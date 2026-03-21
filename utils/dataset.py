@@ -48,6 +48,28 @@ class ImageCaptionDataset(Dataset):
             # Fallback to requested split (will create dummy images if needed)
             self.img_dir = os.path.join(image_root, split)
         
+        # Try multiple naming conventions for captions
+        # 1. Simple format: captions_train.json
+        # 2. COCO format: captions_train2014.json
+        # 3. Annotations prefix: annotations_train.json
+        # 4. Annotations with year: annotations_train2014.json
+        possible_paths = [
+            os.path.join(data_root, "captions", f"captions_{split}.json"),
+            os.path.join(data_root, "captions", f"captions_{split}2014.json"),
+            os.path.join(data_root, "captions", f"annotations_{split}.json"),
+            os.path.join(data_root, "captions", f"annotations_{split}2014.json"),
+        ]
+        
+        self.caption_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                self.caption_path = path
+                break
+        
+        if self.caption_path is None:
+            # Fallback to first option (will trigger dummy data warning)
+            self.caption_path = possible_paths[0]
+        
         self.data = self._load_data()
         
         # Take small subset for debug mode
