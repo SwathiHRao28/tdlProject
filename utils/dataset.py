@@ -83,41 +83,62 @@ class ImageCaptionDataset(Dataset):
         
         If data doesn't exist, generates dummy data.
         """
+        # First try the requested split
+        captions_loaded = False
         if os.path.exists(self.caption_path):
             print(f"Loading captions from: {self.caption_path}")
             with open(self.caption_path, "r") as f:
                 raw_data = json.load(f)
+            captions_loaded = True
+        else:
+            # If requested split not found, try alternatives
+            print(f"⚠️  {self.caption_path} not found")
+            alt_split = "val" if self.split == "train" else "train"
+            alt_paths = [
+                os.path.join(self.data_root, "captions", f"captions_{alt_split}.json"),
+                os.path.join(self.data_root, "captions", f"captions_{alt_split}2014.json"),
+                os.path.join(self.data_root, "captions", f"annotations_{alt_split}.json"),
+                os.path.join(self.data_root, "captions", f"annotations_{alt_split}2014.json"),
+            ]
+            for alt_path in alt_paths:
+                if os.path.exists(alt_path):
+                    print(f"   Using alternative: {alt_path}")
+                    self.caption_path = alt_path
+                    with open(self.caption_path, "r") as f:
+                        raw_data = json.load(f)
+                    captions_loaded = True
+                    break
+        
+        if not captions_loaded:
+            print(f"Warning: No captions found. Using DUMMY data.")
+            return self._generate_dummy_data()
+        
+        # Handle COCO format: {"images": [...], "annotations": [...]}
+        if isinstance(raw_data, dict) and "annotations" in raw_data:
+            print(f"Detected COCO format with {len(raw_data.get('annotations', []))} annotations")
             
-            # Handle COCO format: {"images": [...], "annotations": [...]}
-            if isinstance(raw_data, dict) and "annotations" in raw_data:
-                print(f"Detected COCO format with {len(raw_data.get('annotations', []))} annotations")
-                
-                # Build image_id -> filename mapping
-                image_map = {}
-                for img in raw_data.get("images", []):
-                    image_map[img["id"]] = img.get("file_name", f"{img['id']}.jpg")
-                
-                # Convert to simple format: list of {image_id, caption}
-                converted_data = []
-                for ann in raw_data.get("annotations", []):
-                    img_id = ann["image_id"]
-                    converted_data.append({
-                        "image_id": image_map.get(img_id, f"{img_id}.jpg"),
-                        "caption": ann.get("caption", "")
-                    })
-                return converted_data
+            # Build image_id -> filename mapping
+            image_map = {}
+            for img in raw_data.get("images", []):
+                image_map[img["id"]] = img.get("file_name", f"{img['id']}.jpg")
             
-            # Handle simple format: list of dicts
-            elif isinstance(raw_data, list):
-                print(f"Detected simple format with {len(raw_data)} items")
-                return raw_data
-            
-            else:
-                print(f"Warning: Unknown format. Using DUMMY data.")
-                return self._generate_dummy_data()
+            # Convert to simple format: list of {image_id, caption}
+            converted_data = []
+            for ann in raw_data.get("annotations", []):
+                img_id = ann["image_id"]
+                converted_data.append({
+                    "image_id": image_map.get(img_id, f"{img_id}.jpg"),
+                    "caption": ann.get("caption", "")
+                })
+            return converted_data
+        
+        # Handle simple format: list of dicts
+        elif isinstance(raw_data, list):
+            print(f"Detected simple format with {len(raw_data)} items")
+            return raw_data
         
         else:
-            print(f"Warning: {self.caption_path} not found. Using DUMMY data.")
+            print(f"Warning: Unknown format. Using DUMMY data.")
             return self._generate_dummy_data()
     
     def _generate_dummy_data(self):
@@ -146,6 +167,24 @@ class ImageCaptionDataset(Dataset):
         caption = item["caption"]
         
         img_path = os.path.join(self.img_dir, img_name)
+        
+        # If image doesn't exist in default location, try alternative locations
+        if not os.path.exists(img_path):
+            # Try alternate directories (e.g., val2014, train2014, etc.)
+            image_root = os.path.join(self.data_root, "images")
+            if os.path.exists(image_root):
+                for alt_dir in os.listdir(image_root):
+                    alt_path = os.path.join(image_root, alt_dir, img_name)
+                    if os.path.exists(alt_path):
+                        img_path = alt_path
+                        break
+        
+        # If still not found, skip this item or raise error
+        if not os.path.exists(img_path):
+            print(f"Warning: Image not found: {img_path}")
+            print(f"Available image dirs: {os.listdir(os.path.join(self.data_root, 'images')) if os.path.exists(os.path.join(self.data_root, 'images')) else 'None'}")
+            raise FileNotFoundError(f"Image not found: {img_path}. Searched in {self.img_dir}")
+        
         image = Image.open(img_path).convert("RGB")
         
         if self.transform is not None:
