@@ -18,13 +18,24 @@ class ImageCaptionDataset(Dataset):
         # Assuming format:
         # data_root/
         #   images/
-        #     train/
-        #     val/
+        #     train/ or train2014/
+        #     val/ or val2014/
         #   captions/
-        #     captions_train.json
-        #     captions_val.json
+        #     captions_train.json or captions_train2014.json
+        #     captions_val.json or captions_val2014.json
         self.img_dir = os.path.join(data_root, "images", split)
+        
+        # Try both naming conventions: simple and COCO with year
         self.caption_path = os.path.join(data_root, "captions", f"captions_{split}.json")
+        if not os.path.exists(self.caption_path):
+            # Try COCO naming convention with year suffix
+            self.caption_path = os.path.join(data_root, "captions", f"captions_{split}2014.json")
+        
+        # Also try alternate image directory naming (e.g., val2014 instead of val)
+        if not os.path.exists(self.img_dir):
+            alt_img_dir = os.path.join(data_root, "images", f"{split}2014")
+            if os.path.exists(alt_img_dir):
+                self.img_dir = alt_img_dir
         
         self.data = self._load_data()
         
@@ -43,9 +54,14 @@ class ImageCaptionDataset(Dataset):
             {"image_id": "img1.jpg", "caption": "A dog catching frisbee"},
             ...
         ]
-        If data doesn't exist (e.g. dummy run), generates dummy data.
+        Supports both naming conventions:
+        - Simple: captions_train.json, captions_val.json
+        - COCO: captions_train2014.json, captions_val2014.json
+        
+        If data doesn't exist, generates dummy data.
         """
         if os.path.exists(self.caption_path):
+            print(f"Loading captions from: {self.caption_path}")
             with open(self.caption_path, "r") as f:
                 return json.load(f)
         else:
