@@ -1,0 +1,47 @@
+# Experiment Configurations
+
+# General
+debug: False              # Run in lightweight mode (small subset, fewer steps)
+seed: 42
+device: "cpu"             # Auto-detects 'cuda' if available, defaults to 'cpu'
+
+# Data
+dataset: "coco"           # "coco" or "flickr30k"
+data_dir: "data/coco"     # Path to dataset root
+vocab_size: 10000         # Max vocabulary size
+min_word_freq: 5          # Words appearing fewer times are replaced with <UNK>
+image_size: 224           # 224 or 384 depending on encoder
+
+# DataLoader
+batch_size: 32            # Small batch size to work on CPU
+debug_batch_size: 4       # Very small batch size for debug mode
+num_workers: 0            # Keep 0 for CPU/Laptop compatibility
+
+# Model Architecture
+encoder: "vit"            # "vit", "resnet", "blip", "clip"
+decoder_layers: 6         # Number of transformer layers in decoder
+decoder_heads: 8          # Attention heads
+embed_size: 512           # Word embedding dimension
+hidden_size: 512          # Transformer hidden dimension
+
+# Explainability Weights
+use_alignment_loss: True
+alignment_weight: 0.5
+
+use_counterfactual_loss: True
+counterfactual_weight: 0.3
+
+# Training
+epochs: 20
+debug_epochs: 2
+learning_rate: 0.0001     # 1e-4
+weight_decay: 0.01
+
+# Decoding
+max_length: 20            # Max length of generated caption
+beam_size: 3              # Beam search size (1 for greedy)
+
+# Logging & Checkpoints
+checkpoint_dir: "checkpoints"
+output_dir: "outputs"
+save_every: 1             # Save checkpoint every N epochs

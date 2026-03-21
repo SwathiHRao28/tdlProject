@@ -1,0 +1,44 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test imports
+      run: |
+        python -c "import torch; print(f'PyTorch: {torch.__version__}')"
+        python -c "from models.caption_model import CaptionModel; print('✓ Model imports successfully')"
+        python -c "from utils.dataset import CocoDataset; print('✓ Dataset imports successfully')"
+        python -c "from training.train import train_model; print('✓ Training imports successfully')"
+    
+    - name: Test debug mode (CPU)
+      run: |
+        python main.py --debug 2>&1 | head -50
