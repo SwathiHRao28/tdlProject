@@ -64,40 +64,78 @@ class ImageCaptionDataset(Dataset):
             self.vocab.build_vocabulary([item["caption"] for item in self.data])
             
     def _load_data(self):
-        """Loads data from a simple JSON format:
-        [
-            {"image_id": "img1.jpg", "caption": "A dog catching frisbee"},
-            ...
-        ]
-        Supports multiple naming conventions:
-        - Simple: captions_train.json, captions_val.json
-        - COCO with year: captions_train2014.json, captions_val2014.json
-        - Annotations prefix: annotations_train.json, annotations_val.json
-        - Annotations with year: annotations_train2014.json, annotations_val2014.json
+        """Loads data from JSON. Supports two formats:
+        
+        1. Simple format (list):
+           [
+               {"image_id": "img1.jpg", "caption": "A dog catching frisbee"},
+               ...
+           ]
+        
+        2. COCO format (dict with images and annotations):
+           {
+               "images": [{"id": 1, "file_name": "COCO_train2014_000000000009.jpg"}, ...],
+               "annotations": [
+                   {"image_id": 1, "caption": "A person doing a trick on a truck"},
+                   ...
+               ]
+           }
         
         If data doesn't exist, generates dummy data.
         """
         if os.path.exists(self.caption_path):
             print(f"Loading captions from: {self.caption_path}")
             with open(self.caption_path, "r") as f:
-                return json.load(f)
+                raw_data = json.load(f)
+            
+            # Handle COCO format: {"images": [...], "annotations": [...]}
+            if isinstance(raw_data, dict) and "annotations" in raw_data:
+                print(f"Detected COCO format with {len(raw_data.get('annotations', []))} annotations")
+                
+                # Build image_id -> filename mapping
+                image_map = {}
+                for img in raw_data.get("images", []):
+                    image_map[img["id"]] = img.get("file_name", f"{img['id']}.jpg")
+                
+                # Convert to simple format: list of {image_id, caption}
+                converted_data = []
+                for ann in raw_data.get("annotations", []):
+                    img_id = ann["image_id"]
+                    converted_data.append({
+                        "image_id": image_map.get(img_id, f"{img_id}.jpg"),
+                        "caption": ann.get("caption", "")
+                    })
+                return converted_data
+            
+            # Handle simple format: list of dicts
+            elif isinstance(raw_data, list):
+                print(f"Detected simple format with {len(raw_data)} items")
+                return raw_data
+            
+            else:
+                print(f"Warning: Unknown format. Using DUMMY data.")
+                return self._generate_dummy_data()
+        
         else:
             print(f"Warning: {self.caption_path} not found. Using DUMMY data.")
-            # Generate dummy data for testing
-            os.makedirs(self.img_dir, exist_ok=True)
-            dummy_data = []
-            for i in range(100 if self.debug else 500):
-                img_name = f"dummy_{i}.jpg"
-                img_path = os.path.join(self.img_dir, img_name)
-                if not os.path.exists(img_path):
-                    # Create a random RGB image
-                    Image.new('RGB', (224, 224), color=(random.randint(0,255), random.randint(0,255), random.randint(0,255))).save(img_path)
-                
-                dummy_data.append({
-                    "image_id": img_name,
-                    "caption": f"This is dummy image {i} mostly for testing."
-                })
-            return dummy_data
+            return self._generate_dummy_data()
+    
+    def _generate_dummy_data(self):
+        """Generate dummy data for testing."""
+        os.makedirs(self.img_dir, exist_ok=True)
+        dummy_data = []
+        for i in range(100 if self.debug else 500):
+            img_name = f"dummy_{i}.jpg"
+            img_path = os.path.join(self.img_dir, img_name)
+            if not os.path.exists(img_path):
+                # Create a random RGB image
+                Image.new('RGB', (224, 224), color=(random.randint(0,255), random.randint(0,255), random.randint(0,255))).save(img_path)
+            
+            dummy_data.append({
+                "image_id": img_name,
+                "caption": f"This is dummy image {i} mostly for testing."
+            })
+        return dummy_data
             
     def __len__(self):
         return len(self.data)
