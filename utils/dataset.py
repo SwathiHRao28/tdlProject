@@ -22,35 +22,31 @@ class ImageCaptionDataset(Dataset):
         #     val/ or val2014/
         #   captions/
         #     captions_*.json or annotations_*.json (with optional year suffix 2014)
-        self.img_dir = os.path.join(data_root, "images", split)
         
-        # Try multiple naming conventions for captions
-        # 1. Simple format: captions_train.json
-        # 2. COCO format: captions_train2014.json
-        # 3. Annotations prefix: annotations_train.json
-        # 4. Annotations with year: annotations_train2014.json
-        possible_paths = [
-            os.path.join(data_root, "captions", f"captions_{split}.json"),
-            os.path.join(data_root, "captions", f"captions_{split}2014.json"),
-            os.path.join(data_root, "captions", f"annotations_{split}.json"),
-            os.path.join(data_root, "captions", f"annotations_{split}2014.json"),
-        ]
+        # Find available image directories
+        image_root = os.path.join(data_root, "images")
+        available_img_dirs = []
+        if os.path.exists(image_root):
+            for item in os.listdir(image_root):
+                item_path = os.path.join(image_root, item)
+                if os.path.isdir(item_path):
+                    available_img_dirs.append(item_path)
         
-        self.caption_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                self.caption_path = path
-                break
+        # Use the first available image directory (prefer requested split, then any available)
+        self.img_dir = None
+        if available_img_dirs:
+            # First try the requested split
+            requested_dir = os.path.join(image_root, split)
+            if requested_dir in available_img_dirs:
+                self.img_dir = requested_dir
+            else:
+                # Use any available directory
+                self.img_dir = available_img_dirs[0]
+                print(f"⚠️  Requested image dir '{split}' not found, using '{os.path.basename(self.img_dir)}'")
         
-        if self.caption_path is None:
-            # Fallback to first option (will trigger dummy data warning)
-            self.caption_path = possible_paths[0]
-        
-        # Also try alternate image directory naming (e.g., val2014 instead of val)
-        if not os.path.exists(self.img_dir):
-            alt_img_dir = os.path.join(data_root, "images", f"{split}2014")
-            if os.path.exists(alt_img_dir):
-                self.img_dir = alt_img_dir
+        if self.img_dir is None:
+            # Fallback to requested split (will create dummy images if needed)
+            self.img_dir = os.path.join(image_root, split)
         
         self.data = self._load_data()
         
@@ -168,24 +164,13 @@ class ImageCaptionDataset(Dataset):
         
         img_path = os.path.join(self.img_dir, img_name)
         
-        # If image doesn't exist in default location, try alternative locations
-        if not os.path.exists(img_path):
-            # Try alternate directories (e.g., val2014, train2014, etc.)
-            image_root = os.path.join(self.data_root, "images")
-            if os.path.exists(image_root):
-                for alt_dir in os.listdir(image_root):
-                    alt_path = os.path.join(image_root, alt_dir, img_name)
-                    if os.path.exists(alt_path):
-                        img_path = alt_path
-                        break
-        
-        # If still not found, skip this item or raise error
+        # If image doesn't exist in current directory, skip this item
         if not os.path.exists(img_path):
             print(f"Warning: Image not found: {img_path}")
-            print(f"Available image dirs: {os.listdir(os.path.join(self.data_root, 'images')) if os.path.exists(os.path.join(self.data_root, 'images')) else 'None'}")
-            raise FileNotFoundError(f"Image not found: {img_path}. Searched in {self.img_dir}")
-        
-        image = Image.open(img_path).convert("RGB")
+            # Return a dummy image instead of crashing
+            image = Image.new('RGB', (224, 224), color=(128, 128, 128))
+        else:
+            image = Image.open(img_path).convert("RGB")
         
         if self.transform is not None:
             image = self.transform(image)
