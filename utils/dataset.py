@@ -21,15 +21,30 @@ class ImageCaptionDataset(Dataset):
         #     train/ or train2014/
         #     val/ or val2014/
         #   captions/
-        #     captions_train.json or captions_train2014.json
-        #     captions_val.json or captions_val2014.json
+        #     captions_*.json or annotations_*.json (with optional year suffix 2014)
         self.img_dir = os.path.join(data_root, "images", split)
         
-        # Try both naming conventions: simple and COCO with year
-        self.caption_path = os.path.join(data_root, "captions", f"captions_{split}.json")
-        if not os.path.exists(self.caption_path):
-            # Try COCO naming convention with year suffix
-            self.caption_path = os.path.join(data_root, "captions", f"captions_{split}2014.json")
+        # Try multiple naming conventions for captions
+        # 1. Simple format: captions_train.json
+        # 2. COCO format: captions_train2014.json
+        # 3. Annotations prefix: annotations_train.json
+        # 4. Annotations with year: annotations_train2014.json
+        possible_paths = [
+            os.path.join(data_root, "captions", f"captions_{split}.json"),
+            os.path.join(data_root, "captions", f"captions_{split}2014.json"),
+            os.path.join(data_root, "captions", f"annotations_{split}.json"),
+            os.path.join(data_root, "captions", f"annotations_{split}2014.json"),
+        ]
+        
+        self.caption_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                self.caption_path = path
+                break
+        
+        if self.caption_path is None:
+            # Fallback to first option (will trigger dummy data warning)
+            self.caption_path = possible_paths[0]
         
         # Also try alternate image directory naming (e.g., val2014 instead of val)
         if not os.path.exists(self.img_dir):
@@ -54,9 +69,11 @@ class ImageCaptionDataset(Dataset):
             {"image_id": "img1.jpg", "caption": "A dog catching frisbee"},
             ...
         ]
-        Supports both naming conventions:
+        Supports multiple naming conventions:
         - Simple: captions_train.json, captions_val.json
-        - COCO: captions_train2014.json, captions_val2014.json
+        - COCO with year: captions_train2014.json, captions_val2014.json
+        - Annotations prefix: annotations_train.json, annotations_val.json
+        - Annotations with year: annotations_train2014.json, annotations_val2014.json
         
         If data doesn't exist, generates dummy data.
         """
