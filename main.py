@@ -56,10 +56,19 @@ def main():
         checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")])
         if checkpoints:
             latest_ckpt = os.path.join(checkpoint_dir, checkpoints[-1])
-            print(f"Resuming from checkpoint: {latest_ckpt}")
-            checkpoint = torch.load(latest_ckpt, map_location=device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            start_epoch = checkpoint['epoch'] + 1
+            print(f"Found checkpoint: {latest_ckpt}")
+            try:
+                checkpoint = torch.load(latest_ckpt, map_location=device)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                start_epoch = checkpoint['epoch'] + 1
+                print(f"✅ Resumed from checkpoint (epoch {start_epoch - 1})")
+            except RuntimeError as e:
+                if "size mismatch" in str(e):
+                    print(f"⚠️  Checkpoint vocabulary mismatch (likely from different dataset).")
+                    print(f"   Starting fresh training with new vocabulary size: {len(vocab)}")
+                    start_epoch = 1
+                else:
+                    raise
 
     # Train
     print("Starting training...")
