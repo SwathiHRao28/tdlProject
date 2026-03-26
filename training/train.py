@@ -107,6 +107,12 @@ def train_model(model, train_loader, val_loader, vocab, config, device):
                       f"Loss: {loss.item():.4f} (Cap: {caption_loss.item():.4f}, "
                       f"Align: {align_loss.item():.4f}, CF: {cf_loss.item():.4f})")
                       
+            # Limit the number of steps per epoch (defaulting to 100 if not specified)
+            max_steps = config.get("max_steps_per_epoch", 100)
+            if batch_idx >= max_steps - 1:
+                print(f"Reached max steps per epoch ({max_steps}). Finishing epoch...")
+                break
+                      
         # End of epoch logging
         print(f"--- Epoch {epoch} Summary ---")
         print(f"Avg Loss: {total_loss/len(train_loader):.4f}")
