@@ -37,8 +37,11 @@ class ImageCaptionDataset(Dataset):
         if available_img_dirs:
             # First try the requested split
             requested_dir = os.path.join(image_root, split)
+            requested_dir_2014 = os.path.join(image_root, f"{split}2014")
             if requested_dir in available_img_dirs:
                 self.img_dir = requested_dir
+            elif requested_dir_2014 in available_img_dirs:
+                self.img_dir = requested_dir_2014
             else:
                 # Use any available directory
                 self.img_dir = available_img_dirs[0]
