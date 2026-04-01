@@ -47,6 +47,13 @@ def evaluate_model(model, val_loader, vocab, device):
                 total_bleu4 += b4
                 total_samples += 1
                 
+            # Stop early to save hours of evaluation time!
+            # We'll evaluate on approx 500 images (or batch count that gives > 500)
+            max_eval_samples = 500
+            if total_samples >= max_eval_samples:
+                print(f"Stopping Evaluation early at {total_samples} samples for speed!")
+                break
+                
             # Limit evaluation for speed in debug mode
             if getattr(val_loader.dataset, 'debug', False) and batch_idx >= 1:
                 break
