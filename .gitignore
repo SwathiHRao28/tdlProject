@@ -103,4 +103,6 @@ Thumbs.db
 *.bak
 checkpoints/
 *.pt
-__pycache__/
+__pycache__/data/
+*.json
+*.pt
