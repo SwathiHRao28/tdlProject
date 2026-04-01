@@ -99,9 +99,15 @@ def main():
     device = torch.device(config.get("device", "cpu"))
     
     # Try to load vocabulary from dummy dataset for mapping
-    # In a real scenario, vocab is saved to a file during training.
-    # We will build a dummy vocab if not found just to not crash, though output will be gibberish
-    dummy_dataset = ImageCaptionDataset(data_root=config["data_dir"], split="train", debug=True)
+    # Since we didn't save vocab.pkl to disk during training, we MUST rebuild
+    # the exact same vocabulary natively by reading the full training captions.
+    print("Rebuilding vocabulary from full training dataset (takes a few seconds)...")
+    dummy_dataset = ImageCaptionDataset(
+        data_root=config["data_dir"], 
+        split="train", 
+        debug=False, 
+        freq_threshold=config.get("min_word_freq", 5)
+    )
     vocab = dummy_dataset.vocab
     
     print(f"Loading image from {args.image}")
