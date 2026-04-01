@@ -66,7 +66,8 @@ class CaptionDecoder(nn.Module):
         self.vocab_size = vocab_size
         self.max_length = max_length
         self.embed = nn.Embedding(vocab_size, embed_size)
-        self.pos_encoder = PositionalEncoding(embed_size, max_len=max_length)
+        # Fix PositionalEncoding size mismatch error by defaulting to a large max_len table
+        self.pos_encoder = PositionalEncoding(embed_size, max_len=max(max_length, 5000))
         
         # Linear layer to project visual features to text hidden dimension if they differ
         # Assuming visual features will be projected to `embed_size` outside, or just setting hidden_size=embed_size
