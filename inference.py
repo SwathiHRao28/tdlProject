@@ -4,7 +4,7 @@ import yaml
 import torch
 import torch.nn.functional as F
 from PIL import Image
-import matplotlib.pyplot import plt
+import matplotlib.pyplot as plt
 import numpy as np
 
 from models.caption_model import CaptionModel
