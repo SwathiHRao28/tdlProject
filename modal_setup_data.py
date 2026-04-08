@@ -2,7 +2,7 @@
 One-time data setup: Downloads COCO 2014 dataset to a Modal Volume.
 
 Usage:
-    modal run modal_setup_data.py
+    py -m modal run modal_setup_data.py
 
 This downloads ~20 GB. Takes about 20-30 minutes.
 You only need to run this ONCE — the data persists on the volume.
@@ -19,13 +19,12 @@ COCO_URLS = {
 }
 
 @app.function(
-    image=modal.Image.debian_slim().pip_install("requests", "tqdm"),
+    image=modal.Image.debian_slim().apt_install("unzip").pip_install("requests", "tqdm"),
     volumes={"/data": volume},
     timeout=7200,           # 2 hours max
-    ephemeral_disk=50_000,  # 50 GB scratch disk for downloads
 )
 def download_and_extract():
-    import os, subprocess, glob, requests
+    import os, subprocess, glob, shutil, requests
     from tqdm import tqdm
 
     data_dir = "/data/coco"
@@ -54,22 +53,31 @@ def download_and_extract():
         # Extract
         print(f"📦 Extracting {name}...")
         if name == "annotations":
+            # Extract to /tmp first, then copy caption files to the volume
             subprocess.run(["unzip", "-o", zip_path, "-d", "/tmp/ann_tmp"], check=True)
-            for f in glob.glob("/tmp/ann_tmp/annotations/captions_*.json"):
-                dest = f"{data_dir}/captions/{os.path.basename(f)}"
-                os.rename(f, dest)
+            for src_file in glob.glob("/tmp/ann_tmp/annotations/captions_*.json"):
+                dest = f"{data_dir}/captions/{os.path.basename(src_file)}"
+                shutil.copy2(src_file, dest)  # copy2 works across filesystems (rename does NOT)
                 print(f"  → {dest}")
+            # Cleanup temp extraction
+            shutil.rmtree("/tmp/ann_tmp", ignore_errors=True)
         else:
             # Image zips extract to train2014/ or val2014/ folder
+            # Extract directly to the volume
             subprocess.run(["unzip", "-o", zip_path, "-d", f"{data_dir}/images/"], check=True)
 
         # Mark complete
-        with open(marker, "w") as f:
-            f.write("done")
+        with open(marker, "w") as mf:
+            mf.write("done")
 
         # Cleanup zip to free disk space
         os.remove(zip_path)
         print(f"✅ {name} done!")
+
+        # ⭐ COMMIT AFTER EACH DATASET so progress is saved even if next one crashes
+        print(f"💾 Committing {name} to volume...")
+        volume.commit()
+        print(f"💾 {name} committed!\n")
 
     # Verify final state
     print("\n" + "=" * 50)
@@ -84,13 +92,16 @@ def download_and_extract():
             print(f"  ❌ {split}: MISSING!")
 
     cap_dir = f"{data_dir}/captions"
-    for f in sorted(os.listdir(cap_dir)):
-        size_mb = os.path.getsize(f"{cap_dir}/{f}") / (1024 * 1024)
-        print(f"  📝 {f}: {size_mb:.1f} MB")
+    if os.path.exists(cap_dir) and os.listdir(cap_dir):
+        for f in sorted(os.listdir(cap_dir)):
+            size_mb = os.path.getsize(f"{cap_dir}/{f}") / (1024 * 1024)
+            print(f"  📝 {f}: {size_mb:.1f} MB")
+    else:
+        print("  ❌ No caption files found!")
 
-    volume.commit()
-    print("\n🎉 All data committed to Modal Volume 'coco-dataset-vol'!")
+    print("\n🎉 All data saved to Modal Volume 'coco-dataset-vol'!")
 
 @app.local_entrypoint()
 def main():
     download_and_extract.remote()
+

@@ -6,7 +6,8 @@ from explainability.alignment_loss import AlignmentLoss
 from explainability.counterfactual import CounterfactualLoss
 from torch.utils.tensorboard import SummaryWriter
 
-def train_model(model, train_loader, val_loader, vocab, config, device):
+def train_model(model, train_loader, val_loader, vocab, config, device,
+                start_epoch=1, optimizer_state=None):
     # Setup
     pad_idx = vocab.stoi[vocab.pad_token]
     criterion_caption = nn.CrossEntropyLoss(ignore_index=pad_idx)
@@ -19,6 +20,14 @@ def train_model(model, train_loader, val_loader, vocab, config, device):
         weight_decay=config["weight_decay"]
     )
     
+    # Restore optimizer state for proper resume (preserves learning rate, momentum etc.)
+    if optimizer_state is not None:
+        try:
+            optimizer.load_state_dict(optimizer_state)
+            print(f"✅ Optimizer state restored")
+        except Exception as e:
+            print(f"⚠️  Could not restore optimizer state: {e}. Using fresh optimizer.")
+    
     # We will only train decoder and vis_project components
     model.encoder.eval()
     
@@ -30,7 +39,14 @@ def train_model(model, train_loader, val_loader, vocab, config, device):
     lambda_align = config["alignment_weight"]
     lambda_cf = config["counterfactual_weight"]
     
-    for epoch in range(1, epochs + 1):
+    if start_epoch > epochs:
+        print(f"⚠️  start_epoch ({start_epoch}) > total epochs ({epochs}). Nothing to train.")
+        return model
+    
+    if start_epoch > 1:
+        print(f"📌 Resuming from epoch {start_epoch} (skipping epochs 1-{start_epoch - 1})")
+    
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         total_loss = 0
         total_caption_loss = 0

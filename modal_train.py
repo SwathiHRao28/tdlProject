@@ -65,7 +65,6 @@ REPO_URL = "https://github.com/SwathiHRao28/tdlProject.git"
         "/checkpoints": checkpoints_volume,    # Persistent checkpoint storage
     },
     timeout=14400,                             # 4 hours max
-    ephemeral_disk=10_000,                     # 10 GB scratch
 )
 def train(
     run_name: str = "baseline",
@@ -137,10 +136,10 @@ def train(
         "device": "cuda",
         "num_workers": 4,
         "save_every": 5,                 # Save every 5 epochs (+ last epoch below)
-        # Remove step limits — train on ALL data
-        "max_steps_per_epoch": 999999,
-        "max_train_steps_per_epoch": 999999,
-        "max_val_steps_per_epoch": 999999,
+        # 2000 steps × 32 batch = 64k samples/epoch (good balance of speed vs coverage)
+        "max_steps_per_epoch": 2000,
+        "max_train_steps_per_epoch": 2000,
+        "max_val_steps_per_epoch": 500,
     })
 
     with open(config_path, "w") as f:
@@ -160,7 +159,7 @@ def train(
 
     # ── 6. Run training ───────────────────────────────────
     result = subprocess.run(
-        [sys.executable, "main.py", "--config", config_path],
+        [sys.executable, "-u", "main.py", "--config", config_path],
         cwd=repo_dir,
     )
 

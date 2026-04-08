@@ -51,6 +51,7 @@ def main():
 
     # Resume from checkpoint if it exists and we're not starting fresh
     start_epoch = 1
+    optimizer_state = None
     checkpoint_dir = config["checkpoint_dir"]
     if os.path.exists(checkpoint_dir):
         checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")])
@@ -61,6 +62,7 @@ def main():
                 checkpoint = torch.load(latest_ckpt, map_location=device)
                 model.load_state_dict(checkpoint['model_state_dict'])
                 start_epoch = checkpoint['epoch'] + 1
+                optimizer_state = checkpoint.get('optimizer_state_dict', None)
                 print(f"✅ Resumed from checkpoint (epoch {start_epoch - 1})")
             except RuntimeError as e:
                 if "size mismatch" in str(e):
@@ -72,7 +74,8 @@ def main():
 
     # Train
     print("Starting training...")
-    train_model(model, train_loader, val_loader, vocab, config, device)
+    train_model(model, train_loader, val_loader, vocab, config, device,
+                start_epoch=start_epoch, optimizer_state=optimizer_state)
     
     # Final evaluation
     if not config["debug"] and val_loader is not None:

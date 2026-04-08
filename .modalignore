@@ -1,0 +1,39 @@
+# Git
+.git/
+.github/
+
+# Data (loaded from Modal Volumes, not uploaded)
+data/
+checkpoints/
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+test.log
+tensorboard_logs/
+
+# Docs (not needed on Modal)
+*.md
+LICENSE
+
+# Misc
+tdlProject/
+git_status*.txt
