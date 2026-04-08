@@ -1,10 +1,12 @@
 import torch
 import torch.nn as nn
+import random
 
 class CounterfactualLoss(nn.Module):
-    def __init__(self, mask_ratio=0.2):
+    def __init__(self, mask_ratio=0.2, max_timesteps=5):
         super(CounterfactualLoss, self).__init__()
         self.mask_ratio = mask_ratio
+        self.max_timesteps = max_timesteps  # Sample this many timesteps per batch for efficiency
 
     def forward(self, model, features, captions, pad_idx, attribution_maps, padding_mask=None):
         B, seq_len, num_pixels = attribution_maps.shape
@@ -18,6 +20,17 @@ class CounterfactualLoss(nn.Module):
         total_cf_loss = 0.0
         valid_tokens = 0
         
+        # Build list of valid (non-fully-padded) timestep indices
+        all_timesteps = list(range(seq_len))
+        if padding_mask is not None:
+            all_timesteps = [t for t in all_timesteps if not padding_mask[:, t].all()]
+
+        # Randomly sample a subset of timesteps to keep training efficient
+        # (each timestep re-runs the decoder, so doing all of them is very expensive)
+        if len(all_timesteps) > self.max_timesteps:
+            timesteps = sorted(random.sample(all_timesteps, self.max_timesteps))
+        else:
+            timesteps = all_timesteps
 
         for t in timesteps:
             if padding_mask is not None and padding_mask[:, t].all():
@@ -33,7 +46,7 @@ class CounterfactualLoss(nn.Module):
             keep_mask = (attr_map_t < thresholds).unsqueeze(-1).float() 
             masked_features = features * keep_mask
             
-            # Re-run decoder with masked features ONLY for this random valid step
+            # Re-run decoder with masked features ONLY for this sampled step
             masked_outputs, _ = model.decoder(masked_features, captions, pad_idx)
             masked_probs = torch.softmax(masked_outputs, dim=-1)
             
@@ -52,4 +65,10 @@ class CounterfactualLoss(nn.Module):
                 valid_tokens += B
                 total_cf_loss = total_cf_loss - drop.sum()
                 
-
+        # Return normalized loss (avoid division by zero)
+        if isinstance(valid_tokens, int) and valid_tokens == 0:
+            return torch.tensor(0.0, device=features.device, requires_grad=True)
+        elif isinstance(valid_tokens, torch.Tensor) and valid_tokens.item() == 0:
+            return torch.tensor(0.0, device=features.device, requires_grad=True)
+        
+        return total_cf_loss / valid_tokens
