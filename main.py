@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train Explainable Image Captioning Model")
     parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     parser.add_argument("--debug", action="store_true", default=False, help="Run in debug mode (subset of data)")
+    parser.add_argument("--evaluate-only", action="store_true", help="Run only the evaluation loop on the latest checkpoint")
     args = parser.parse_args()
 
     # Load configuration
@@ -73,6 +74,18 @@ def main():
                     raise
 
     # Train
+    if args.evaluate_only:
+        print("\n📊 Skipping training. Running Formal Evaluation...")
+        if val_loader is not None:
+            from training.evaluate import evaluate_model
+            metrics = evaluate_model(model, val_loader, vocab, device)
+            print("\n🏆 FINAL EVALUATION METRICS:")
+            for k, v in metrics.items():
+                print(f"   {k}: {v:.4f}")
+        else:
+            print("❌ No validation loader available.")
+        return
+
     print("Starting training...")
     train_model(model, train_loader, val_loader, vocab, config, device,
                 start_epoch=start_epoch, optimizer_state=optimizer_state)

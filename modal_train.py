@@ -71,6 +71,7 @@ def train(
     epochs: int = 20,
     batch_size: int = 32,
     resume: bool = True,
+    evaluate_only: bool = False,
 ):
     import os, subprocess, yaml, torch, sys, shutil
 
@@ -173,8 +174,12 @@ def train(
     print(f"{'='*60}\n")
 
     # ── 6. Run training ───────────────────────────────────
+    cmd = [sys.executable, "-u", "main.py", "--config", config_path]
+    if evaluate_only:
+        cmd.append("--evaluate-only")
+        
     result = subprocess.run(
-        [sys.executable, "-u", "main.py", "--config", config_path],
+        cmd,
         cwd=repo_dir,
     )
 
@@ -313,7 +318,11 @@ def main(
     """
     if action == "train":
         print(f"🚀 Launching training for '{run_name}'...")
-        train.remote(run_name=run_name, epochs=epochs, batch_size=batch_size)
+        train.remote(run_name=run_name, epochs=epochs, batch_size=batch_size, evaluate_only=False)
+
+    elif action == "evaluate":
+        print(f"📊 Launching Cloud Evaluation (5000 images) for '{run_name}'...")
+        train.remote(run_name=run_name, epochs=epochs, batch_size=batch_size, evaluate_only=True)
 
     elif action == "list":
         list_checkpoints.remote()
