@@ -112,8 +112,20 @@ def compute_batch_attribution(model, features, captions, pad_idx, fast_mode=Fals
         for t in range(seq_len):
             # We explain the prediction of the true next word (teacher forcing)
             target_class = captions[:, t].clone()
+            
+            # 🔥 OPTIMIZATION: Do not compute gradients if the entire batch is just <pad>
+            if (target_class == pad_idx).all():
+                continue
+                
             score = outputs[:, t, :].gather(1, target_class.unsqueeze(1)).squeeze(1)
             
+            # Mask out padding scores so they don't produce gradients
+            mask = (target_class != pad_idx).float()
+            score = score * mask
+            
+            if score.sum() == 0:
+                continue
+
             model.zero_grad()
             if features.grad is not None:
                 features.grad.zero_()

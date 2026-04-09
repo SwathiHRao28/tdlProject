@@ -251,13 +251,56 @@ def download_checkpoint(run_name: str, epoch: int) -> bytes:
         return f.read()
 
 
+@app.function(
+    image=training_image,
+    volumes={"/data": data_volume, "/checkpoints": checkpoints_volume},
+    timeout=600,
+)
+def run_inference_remote(run_name: str, epoch: int) -> bytes:
+    """Run inference against a few Validation images directly on the Volume and zip them up!"""
+    import os, subprocess, sys, zipfile, io, shutil
+    
+    repo_dir = "/tmp/project"
+    if os.path.exists(repo_dir):
+        shutil.rmtree(repo_dir)
+    subprocess.run(["git", "clone", "--depth=1", REPO_URL, repo_dir], check=True)
+    os.chdir(repo_dir)
+
+    # Symlink data so code works
+    os.makedirs("data", exist_ok=True)
+    if not os.path.exists("data/coco"):
+        os.symlink("/data/coco", "data/coco")
+
+    # Pick predefined validation images 
+    # (Since modal_setup_data downloaded images/val2014)
+    val_images_dir = "data/coco/images/val2014"
+    import glob
+    test_images = glob.glob(f"{val_images_dir}/*.jpg")[:3]
+    
+    ckpt_path = f"/checkpoints/{run_name}/epoch_{epoch:02d}.pt"
+    
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w') as zf:
+        for i, img in enumerate(test_images):
+            print(f"🔍 Running inference on {img}...")
+            subprocess.run([sys.executable, "inference.py", "--image", img, "--checkpoint", ckpt_path])
+            
+            # Pack outputs
+            if os.path.exists("outputs"):
+                for out_file in os.listdir("outputs"):
+                    if out_file.endswith(".png"):
+                        zf.write(os.path.join("outputs", out_file), f"image_{i}_{out_file}")
+                        os.remove(os.path.join("outputs", out_file))
+
+    return memory_file.getvalue()
+
 # ═══════════════════════════════════════════════════════════
 # LOCAL ENTRYPOINT — Run from your laptop terminal
 # ═══════════════════════════════════════════════════════════
 
 @app.local_entrypoint()
 def main(
-    action: str = "train",           # "train", "list", "download"
+    action: str = "train",           # "train", "list", "download", "infer"
     run_name: str = "baseline",      # "baseline", "align_only", "cf_only", "proposed"
     epochs: int = 20,
     batch_size: int = 32,
@@ -265,17 +308,11 @@ def main(
     """
     Examples:
         modal run modal_train.py --run-name baseline --epochs 20
-        modal run modal_train.py --run-name proposed --epochs 20
-        modal run modal_train.py --action list
-        modal run modal_train.py --action download --run-name baseline --epochs 20
+        modal run modal_train.py --action infer --run-name baseline --epochs 10
     """
     if action == "train":
         print(f"🚀 Launching training for '{run_name}'...")
-        train.remote(
-            run_name=run_name,
-            epochs=epochs,
-            batch_size=batch_size,
-        )
+        train.remote(run_name=run_name, epochs=epochs, batch_size=batch_size)
 
     elif action == "list":
         list_checkpoints.remote()
@@ -286,6 +323,14 @@ def main(
         with open(local_path, "wb") as f:
             f.write(data)
         print(f"✅ Downloaded checkpoint → {local_path} ({len(data) / (1024*1024):.1f} MB)")
+        
+    elif action == "infer":
+        print(f"🖼️ Running cloud inference and zipping visuals...")
+        zip_bytes = run_inference_remote.remote(run_name=run_name, epoch=epochs)
+        zip_path = f"visuals_{run_name}_epoch_{epochs:02d}.zip"
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+        print(f"✅ Downloaded inference images → {zip_path}")
 
     else:
         print(f"❌ Unknown action '{action}'. Use: train, list, download")
