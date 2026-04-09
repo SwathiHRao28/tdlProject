@@ -48,8 +48,8 @@ def evaluate_model(model, val_loader, vocab, device):
                 total_samples += 1
                 
             # Stop early to save hours of evaluation time!
-            # We'll evaluate on approx 500 images (or batch count that gives > 500)
-            max_eval_samples = 500
+            # We'll evaluate on 5000 images (Karpathy test split standard size)
+            max_eval_samples = 5000
             if total_samples >= max_eval_samples:
                 print(f"Stopping Evaluation early at {total_samples} samples for speed!")
                 break
