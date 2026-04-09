@@ -253,6 +253,7 @@ def download_checkpoint(run_name: str, epoch: int) -> bytes:
 
 @app.function(
     image=training_image,
+    gpu="any",   # We MUST ask Modal for a GPU, otherwise PyTorch crashes!
     volumes={"/data": data_volume, "/checkpoints": checkpoints_volume},
     timeout=600,
 )
