@@ -21,6 +21,7 @@ Usage:
     modal run modal_train.py --action download --run-name baseline --epochs 20
 """
 import modal
+import os
 
 app = modal.App("caption-training")
 
@@ -44,6 +45,8 @@ training_image = (
         "python -c \"import nltk; nltk.download('punkt'); nltk.download('punkt_tab')\""
     )
 )
+
+
 
 # ── Model variant configurations ──────────────────────────
 MODEL_CONFIGS = {
@@ -256,6 +259,7 @@ def download_checkpoint(run_name: str, epoch: int) -> bytes:
         return f.read()
 
 
+
 @app.function(
     image=training_image,
     gpu="any",   # We MUST ask Modal for a GPU, otherwise PyTorch crashes!
@@ -346,7 +350,7 @@ def run_comparison_remote() -> bytes:
 
 @app.local_entrypoint()
 def main(
-    action: str = "train",           # "train", "list", "download", "infer", "evaluate", "compare"
+    action: str = "train",           # "train", "list", "download", "infer", "evaluate", "compare", "upload"
     run_name: str = "baseline",      # "baseline", "align_only", "cf_only", "proposed"
     epochs: int = 20,
     batch_size: int = 32,
