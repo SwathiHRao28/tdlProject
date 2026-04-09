@@ -300,16 +300,57 @@ def run_inference_remote(run_name: str, epoch: int) -> bytes:
 
     return memory_file.getvalue()
 
+@app.function(
+    image=training_image,
+    gpu="any",
+    volumes={"/data": data_volume, "/checkpoints": checkpoints_volume},
+    timeout=1200,
+)
+def run_comparison_remote() -> bytes:
+    """Run compare_models.py directly on the Volume and zip the comparisons folder!"""
+    import os, subprocess, sys, zipfile, io, shutil
+    
+    repo_dir = "/tmp/project"
+    if os.path.exists(repo_dir):
+        shutil.rmtree(repo_dir)
+    subprocess.run(["git", "clone", "--depth=1", REPO_URL, repo_dir], check=True)
+    os.chdir(repo_dir)
+
+    os.makedirs("data", exist_ok=True)
+    if not os.path.exists("data/coco"):
+        os.symlink("/data/coco", "data/coco")
+
+    baseline_path = "/checkpoints/baseline/epoch_10.pt"
+    proposed_path = "/checkpoints/proposed/epoch_09.pt"
+    
+    print("🔍 Running Cloud Comparison Scanner...")
+    subprocess.run([
+        sys.executable, "compare_models.py",
+        "--baseline", baseline_path,
+        "--proposed", proposed_path,
+        "--num", "100"
+    ])
+        
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w') as zf:
+        if os.path.exists("comparisons"):
+            for out_file in os.listdir("comparisons"):
+                if out_file.endswith(".png"):
+                    zf.write(os.path.join("comparisons", out_file), f"comparisons/{out_file}")
+
+    return memory_file.getvalue()
+
 # ═══════════════════════════════════════════════════════════
 # LOCAL ENTRYPOINT — Run from your laptop terminal
 # ═══════════════════════════════════════════════════════════
 
 @app.local_entrypoint()
 def main(
-    action: str = "train",           # "train", "list", "download", "infer"
+    action: str = "train",           # "train", "list", "download", "infer", "evaluate", "compare"
     run_name: str = "baseline",      # "baseline", "align_only", "cf_only", "proposed"
     epochs: int = 20,
     batch_size: int = 32,
+    out_path: str = "",              # optional absolute path to override save location
 ):
     """
     Examples:
@@ -329,7 +370,7 @@ def main(
 
     elif action == "download":
         data = download_checkpoint.remote(run_name=run_name, epoch=epochs)
-        local_path = f"{run_name}_epoch_{epochs:02d}.pt"
+        local_path = out_path if out_path else f"{run_name}_epoch_{epochs:02d}.pt"
         with open(local_path, "wb") as f:
             f.write(data)
         print(f"✅ Downloaded checkpoint → {local_path} ({len(data) / (1024*1024):.1f} MB)")
@@ -341,6 +382,14 @@ def main(
         with open(zip_path, "wb") as f:
             f.write(zip_bytes)
         print(f"✅ Downloaded inference images → {zip_path}")
+
+    elif action == "compare":
+        print(f"🖼️ Running cloud Comparison Scanner against Baseline vs Proposed...")
+        zip_bytes = run_comparison_remote.remote()
+        zip_path = f"comparisons_ablation.zip"
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+        print(f"✅ Downloaded 4-panel inference matrices → {zip_path}")
 
     else:
         print(f"❌ Unknown action '{action}'. Use: train, list, download")
