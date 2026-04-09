@@ -128,14 +128,15 @@ def train(
         "debug": False,
         "epochs": epochs,
         "batch_size": batch_size,
-        "checkpoint_dir": local_ckpt_dir,
+        "checkpoint_dir": persistent_ckpt_dir, # Write DIRECTLY to the persistent volume!
+        "log_dir": f"{persistent_ckpt_dir}/logs", # ⭐ Save TensorBoard logs persistently
         "output_dir": f"outputs/{run_name}",
         "use_alignment_loss": use_alignment,
         "use_counterfactual_loss": use_counterfactual,
         "data_dir": "data/coco",
         "device": "cuda",
         "num_workers": 4,
-        "save_every": 5,                 # Save every 5 epochs (+ last epoch below)
+        "save_every": 1,                 # ⭐ Save checkpoint every 1 epoch!
         # 2000 steps × 32 batch = 64k samples/epoch (good balance of speed vs coverage)
         "max_steps_per_epoch": 2000,
         "max_train_steps_per_epoch": 2000,
@@ -144,6 +145,20 @@ def train(
 
     with open(config_path, "w") as f:
         yaml.dump(config, f)
+        
+    # ── 4b. Setup Background Commit Thread ────────────────
+    # This guarantees that the volume pushes to Modal cloud every 2 minutes
+    import threading, time
+    def auto_commit():
+        while True:
+            time.sleep(120)
+            try:
+                checkpoints_volume.commit()
+            except Exception:
+                pass
+    
+    t = threading.Thread(target=auto_commit, daemon=True)
+    t.start()
 
     # ── 5. Print run banner ───────────────────────────────
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"

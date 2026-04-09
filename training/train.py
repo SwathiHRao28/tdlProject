@@ -31,7 +31,9 @@ def train_model(model, train_loader, val_loader, vocab, config, device,
     # We will only train decoder and vis_project components
     model.encoder.eval()
     
-    writer = SummaryWriter(log_dir=os.path.join("outputs", "logs"))
+    # Ensure we use the persistent log directory if configured
+    log_dir = config.get("log_dir", os.path.join("outputs", "logs"))
+    writer = SummaryWriter(log_dir=log_dir)
     
     epochs = config["debug_epochs"] if config["debug"] else config["epochs"]
     global_step = 0

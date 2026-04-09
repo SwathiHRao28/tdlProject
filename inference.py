@@ -93,6 +93,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", type=str, required=True, help="Path to input image")
     parser.add_argument("--config", type=str, default="configs/config.yaml")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Explicit path to a .pt file")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -127,16 +128,20 @@ def main():
     ).to(device)
     
     # Load checkpoint
-    checkpoint_dir = config["checkpoint_dir"]
-    if os.path.exists(checkpoint_dir):
-        checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")])
-        if checkpoints:
-            latest_ckpt = os.path.join(checkpoint_dir, checkpoints[-1])
-            print(f"Loading checkpoint: {latest_ckpt}")
-            checkpoint = torch.load(latest_ckpt, map_location=device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            print("No checkpoints found. Running with untrained random weights!")
+    latest_ckpt = None
+    if args.checkpoint and os.path.exists(args.checkpoint):
+        latest_ckpt = args.checkpoint
+    else:
+        checkpoint_dir = config["checkpoint_dir"]
+        if os.path.exists(checkpoint_dir):
+            checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.endswith(".pt")])
+            if checkpoints:
+                latest_ckpt = os.path.join(checkpoint_dir, checkpoints[-1])
+                
+    if latest_ckpt:
+        print(f"Loading checkpoint: {latest_ckpt}")
+        checkpoint = torch.load(latest_ckpt, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
     else:
         print("No checkpoints found. Running with untrained random weights!")
 
