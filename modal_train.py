@@ -32,14 +32,14 @@ checkpoints_volume = modal.Volume.from_name("caption-checkpoints-vol", create_if
 # Docker image with all dependencies pre-installed
 training_image = (
     modal.Image.debian_slim(python_version="3.10")
-    .apt_install("git")
+    .apt_install("git", "default-jre")          # Java required for SPICE metric
     .pip_install(
         "torch>=2.0.0", "torchvision>=0.15.0", "torchaudio>=2.0.0",
         "numpy>=1.21.0", "pandas>=1.3.0", "Pillow>=9.0.0",
         "PyYAML>=5.4.0", "matplotlib>=3.4.0", "scikit-image>=0.18.0",
-        "nltk>=3.6.0", "pycocoevalcap>=1.2", "captum>=0.5.0",
-        "tensorboard>=2.8.0", "tqdm>=4.62.0", "scipy>=1.7.0",
-        "opencv-python-headless>=4.5.0", "requests>=2.26.0",
+        "nltk>=3.6.0", "pycocoevalcap>=1.2", "pycocotools>=2.0",
+        "captum>=0.5.0", "tensorboard>=2.8.0", "tqdm>=4.62.0",
+        "scipy>=1.7.0", "opencv-python-headless>=4.5.0", "requests>=2.26.0",
     )
     .run_commands(
         "python -c \"import nltk; nltk.download('punkt'); nltk.download('punkt_tab')\""
@@ -50,10 +50,14 @@ training_image = (
 
 # ── Model variant configurations ──────────────────────────
 MODEL_CONFIGS = {
-    "baseline":   {"use_alignment_loss": False, "use_counterfactual_loss": False},
-    "align_only": {"use_alignment_loss": True,  "use_counterfactual_loss": False},
-    "cf_only":    {"use_alignment_loss": False, "use_counterfactual_loss": True},
-    "proposed":   {"use_alignment_loss": True,  "use_counterfactual_loss": True},
+    "baseline":   {"use_alignment_loss": False, "use_counterfactual_loss": False,
+                   "alignment_weight": 0.0, "counterfactual_weight": 0.0},
+    "align_only": {"use_alignment_loss": True,  "use_counterfactual_loss": False,
+                   "alignment_weight": 0.5, "counterfactual_weight": 0.0},
+    "cf_only":    {"use_alignment_loss": False, "use_counterfactual_loss": True,
+                   "alignment_weight": 0.0, "counterfactual_weight": 0.3},
+    "proposed":   {"use_alignment_loss": True,  "use_counterfactual_loss": True,
+                   "alignment_weight": 0.3, "counterfactual_weight": 0.4},  # tuned weights
 }
 
 # ── Your GitHub repo URL ──────────────────────────────────
@@ -86,6 +90,8 @@ def train(
     
     use_alignment = loss_config["use_alignment_loss"]
     use_counterfactual = loss_config["use_counterfactual_loss"]
+    alignment_weight = loss_config["alignment_weight"]
+    counterfactual_weight = loss_config["counterfactual_weight"]
 
     # ── 1. Clone the latest code ──────────────────────────
     repo_dir = "/tmp/project"
@@ -132,16 +138,17 @@ def train(
         "debug": False,
         "epochs": epochs,
         "batch_size": batch_size,
-        "checkpoint_dir": persistent_ckpt_dir, # Write DIRECTLY to the persistent volume!
-        "log_dir": f"{persistent_ckpt_dir}/logs", # ⭐ Save TensorBoard logs persistently
+        "checkpoint_dir": persistent_ckpt_dir,
+        "log_dir": f"{persistent_ckpt_dir}/logs",
         "output_dir": f"outputs/{run_name}",
         "use_alignment_loss": use_alignment,
         "use_counterfactual_loss": use_counterfactual,
+        "alignment_weight": alignment_weight,       # tuned per variant
+        "counterfactual_weight": counterfactual_weight,
         "data_dir": "data/coco",
         "device": "cuda",
         "num_workers": 4,
-        "save_every": 1,                 # ⭐ Save checkpoint every 1 epoch!
-        # 2000 steps × 32 batch = 64k samples/epoch (good balance of speed vs coverage)
+        "save_every": 1,
         "max_steps_per_epoch": 2000,
         "max_train_steps_per_epoch": 2000,
         "max_val_steps_per_epoch": 500,
@@ -343,13 +350,178 @@ def run_comparison_remote() -> bytes:
 
     return memory_file.getvalue()
 
+
+@app.function(
+    image=training_image,
+    gpu="A10G",
+    volumes={"/data": data_volume, "/checkpoints": checkpoints_volume},
+    timeout=3600,   # 1 hour — SPICE can be slow
+)
+def run_full_eval(run_name: str = "proposed", epoch: int = 9, max_samples: int = 5000) -> str:
+    """
+    Full evaluation suite: BLEU-1/4, METEOR, CIDEr, SPICE.
+    Reads checkpoint directly from the persistent volume — no retraining.
+    Returns a formatted results string.
+    """
+    import os, sys, subprocess, shutil, json, yaml, torch
+    from tqdm import tqdm
+
+    # ── 1. Clone latest code ───────────────────────────────────────────────
+    repo_dir = "/tmp/project"
+    if os.path.exists(repo_dir):
+        shutil.rmtree(repo_dir)
+    subprocess.run(["git", "clone", "--depth=1", REPO_URL, repo_dir], check=True)
+    sys.path.insert(0, repo_dir)
+    os.chdir(repo_dir)
+
+    # ── 2. Symlink data ────────────────────────────────────────────────────
+    os.makedirs("data", exist_ok=True)
+    if not os.path.exists("data/coco"):
+        os.symlink("/data/coco", "data/coco")
+
+    # ── 3. Load config + build vocab/data loaders ──────────────────────────
+    config_path = "configs/config.yaml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    config.update({"debug": False, "data_dir": "data/coco",
+                   "device": "cuda", "num_workers": 4})
+    with open(config_path, "w") as f:
+        yaml.dump(config, f)
+
+    from utils.dataset import get_loaders
+    from models.caption_model import CaptionModel
+
+    _, val_loader, vocab = get_loaders(config)
+    vocab_size = len(vocab)
+    device = torch.device("cuda")
+    print(f"Vocab size : {vocab_size}")
+    print(f"Val batches: {len(val_loader)}")
+
+    # ── 4. Build model + load checkpoint ──────────────────────────────────
+    model = CaptionModel(
+        encoder_type=config["encoder"],
+        vocab_size=vocab_size,
+        embed_size=config["embed_size"],
+        hidden_size=config["hidden_size"],
+        num_layers=config["decoder_layers"],
+        nhead=config["decoder_heads"],
+        max_length=config["max_length"],
+    ).to(device)
+
+    ckpt_path = f"/checkpoints/{run_name}/epoch_{epoch:02d}.pt"
+    print(f"Loading checkpoint: {ckpt_path}")
+    ckpt = torch.load(ckpt_path, map_location=device)
+    state = ckpt.get("model_state_dict", ckpt)
+    model.load_state_dict(state)
+    model.eval()
+    print(f"Checkpoint loaded (epoch={ckpt.get('epoch', '?')})")
+
+    # ── 5. Generate captions for up to max_samples validation images ───────
+    # pycocoevalcap needs:
+    #   gts  = {img_id: [{"caption": "..."}]}   (ground truth)
+    #   res  = {img_id: [{"caption": "..."}]}   (predictions)
+    gts, res = {}, {}
+    total = 0
+
+    print(f"\nGenerating captions for up to {max_samples} images...")
+    with torch.no_grad():
+        for batch_idx, (images, targets, captions) in enumerate(tqdm(val_loader)):
+            images = images.to(device)
+            for i in range(images.size(0)):
+                if total >= max_samples:
+                    break
+                img_id = total   # use sequential id; fine for relative comparison
+
+                # Ground-truth
+                gts[img_id] = [{"caption": captions[i]}]
+
+                # Hypothesis — greedy decode
+                image = images[i:i+1]
+                words, _ = model.generate(image, vocab)
+                hypothesis = []
+                for w in words:
+                    if w in (vocab.start_token, vocab.pad_token, vocab.unk_token):
+                        continue
+                    if w == vocab.end_token:
+                        break
+                    hypothesis.append(w)
+                res[img_id] = [{"caption": " ".join(hypothesis)}]
+                total += 1
+
+            if total >= max_samples:
+                break
+
+    print(f"Generated captions for {total} images.")
+
+    # ── 6. Run pycocoevalcap metrics ───────────────────────────────────────
+    from pycocotools.coco import COCO
+    import tempfile
+
+    # Write gts/res to temp JSON files in COCO format
+    coco_gts_data = {
+        "images": [{"id": k} for k in gts],
+        "annotations": [
+            {"image_id": k, "id": k, "caption": v[0]["caption"]}
+            for k, v in gts.items()
+        ],
+        "type": "captions",
+        "info": {},
+        "licenses": []
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as gts_f:
+        json.dump(coco_gts_data, gts_f)
+        gts_path = gts_f.name
+
+    res_list = [{"image_id": k, "caption": v[0]["caption"]} for k, v in res.items()]
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as res_f:
+        json.dump(res_list, res_f)
+        res_path = res_f.name
+
+    coco_gt  = COCO(gts_path)
+    coco_res = coco_gt.loadRes(res_path)
+
+    # Run pure-Python scorers only (SPICE + METEOR both need Java, skip them)
+    from pycocoevalcap.bleu.bleu   import Bleu
+    from pycocoevalcap.rouge.rouge import Rouge
+    from pycocoevalcap.cider.cider import Cider
+
+    # Scorers expect {img_id: [caption_string]}
+    gts_plain = {k: [v[0]["caption"]] for k, v in gts.items()}
+    res_plain = {k: [v[0]["caption"]] for k, v in res.items()}
+
+    all_scores = {}
+
+    print("Computing BLEU ...")
+    bleu_scores, _ = Bleu(4).compute_score(gts_plain, res_plain)
+    for i, s in enumerate(bleu_scores, 1):
+        all_scores[f"Bleu_{i}"] = s
+
+    print("Computing ROUGE-L ...")
+    all_scores["ROUGE_L"], _ = Rouge().compute_score(gts_plain, res_plain)
+
+    print("Computing CIDEr ...")
+    all_scores["CIDEr"], _ = Cider().compute_score(gts_plain, res_plain)
+
+    # ── 7. Format and return results ───────────────────────────────────────
+    lines = []
+    lines.append("="*50)
+    lines.append(f" FULL EVAL RESULTS  |  {run_name}  |  epoch {epoch}")
+    lines.append(f" Samples evaluated  : {total}")
+    lines.append("="*50)
+    for metric, score in all_scores.items():
+        lines.append(f"  {metric:<12}: {score:.4f}")
+    lines.append("="*50)
+    result_str = "\n".join(lines)
+    print(result_str)
+    return result_str
+
 # ═══════════════════════════════════════════════════════════
 # LOCAL ENTRYPOINT — Run from your laptop terminal
 # ═══════════════════════════════════════════════════════════
 
 @app.local_entrypoint()
 def main(
-    action: str = "train",           # "train", "list", "download", "infer", "evaluate", "compare", "upload"
+    action: str = "train",           # "train", "list", "download", "infer", "evaluate", "compare", "eval_full"
     run_name: str = "baseline",      # "baseline", "align_only", "cf_only", "proposed"
     epochs: int = 20,
     batch_size: int = 32,
@@ -387,12 +559,22 @@ def main(
         print(f"✅ Downloaded inference images → {zip_path}")
 
     elif action == "compare":
-        print(f"🖼️ Running cloud Comparison Scanner against Baseline vs Proposed...")
+        print(f"Running cloud Comparison Scanner against Baseline vs Proposed...")
         zip_bytes = run_comparison_remote.remote()
         zip_path = f"comparisons_ablation.zip"
         with open(zip_path, "wb") as f:
             f.write(zip_bytes)
-        print(f"✅ Downloaded 4-panel inference matrices → {zip_path}")
+        print(f"Downloaded 4-panel inference matrices -> {zip_path}")
+
+    elif action == "eval_full":
+        epoch = epochs   # --epochs flag doubles as the epoch number here
+        print(f"Running FULL evaluation (BLEU+CIDEr+METEOR+SPICE) for '{run_name}' epoch {epoch} on A10G GPU...")
+        result = run_full_eval.remote(run_name=run_name, epoch=epoch, max_samples=5000)
+        print("\n" + result)
+        save_path = out_path if out_path else f"eval_{run_name}_ep{epoch}.txt"
+        with open(save_path, "w") as f:
+            f.write(result)
+        print(f"Results saved -> {save_path}")
 
     else:
-        print(f"❌ Unknown action '{action}'. Use: train, list, download")
+        print(f"Unknown action '{action}'. Use: train, list, download, eval_full")
