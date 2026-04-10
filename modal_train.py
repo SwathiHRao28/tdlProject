@@ -339,8 +339,7 @@ def run_comparison_remote() -> bytes:
     with zipfile.ZipFile(memory_file, 'w') as zf:
         if os.path.exists("comparisons"):
             for out_file in os.listdir("comparisons"):
-                if out_file.endswith(".png"):
-                    zf.write(os.path.join("comparisons", out_file), f"comparisons/{out_file}")
+                zf.write(os.path.join("comparisons", out_file), f"comparisons/{out_file}")
 
     return memory_file.getvalue()
 
